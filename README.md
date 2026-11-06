@@ -1,1 +1,1 @@
-# nodered-proyecto-git
+Proyecto B02 estacion de bombeo - Node-RED y dashboard.
