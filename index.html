@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B02 · Estación de bombeo automatizada</title>
+<style>
+/* ===================== ESTILOS ===================== */
+:root{
+  --bg:#eef2f6; --card:#ffffff; --ink:#1e293b; --muted:#64748b; --line:#dbe2ea;
+  --head:#0f2a43; --blue:#2563eb; --water:#38bdf8; --green:#16a34a; --red:#dc2626;
+  --amber:#d97706; --gray:#94a3b8;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+header{background:var(--head);color:#fff;padding:10px 18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+header h1{font-size:18px;margin:0;font-weight:600}
+header small{opacity:.7;display:block;font-weight:400;font-size:12px}
+.conn{display:flex;gap:10px;align-items:center;font-size:12px;flex-wrap:wrap}
+.conn input{width:190px;padding:4px 6px;border-radius:4px;border:1px solid #456;background:#17375a;color:#fff}
+.conn select{padding:4px;border-radius:4px;border:1px solid #456;background:#17375a;color:#fff}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--gray);display:inline-block;margin-right:4px}
+.dot.ok{background:#22c55e}.dot.bad{background:#ef4444}
+nav{display:flex;gap:4px;padding:10px 18px 0}
+nav button{border:none;background:#d5dde6;padding:9px 18px;border-radius:8px 8px 0 0;cursor:pointer;font-size:14px;font-weight:600;color:#334155}
+nav button.act{background:var(--card);color:var(--blue)}
+main{padding:0 18px 24px}
+.view{display:none;background:transparent}.view.act{display:block}
+.banner{display:none;margin:12px 0 0;padding:10px 14px;border-radius:8px;font-weight:600}
+.banner.err{display:block;background:#fee2e2;color:#991b1b}
+.banner.alm{display:block;background:#fef3c7;color:#92400e;animation:blink 1.2s infinite}
+@keyframes blink{50%{opacity:.55}}
+.grid2{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px;margin-top:14px}
+@media(max-width:980px){.grid2{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:15px}
+.cards4{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.kv{border:1px solid var(--line);border-radius:8px;padding:10px;background:#f8fafc}
+.kv .l{font-size:12px;color:var(--muted)}
+.kv .v{font-size:26px;font-weight:700;margin-top:2px}
+.kv .u{font-size:12px;color:var(--muted);font-weight:400}
+.kv .f{font-size:11px;color:var(--muted);margin-top:4px}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button.b{border:none;border-radius:6px;padding:8px 12px;font-weight:600;cursor:pointer;color:#fff;background:var(--blue)}
+button.b:hover{filter:brightness(1.1)}
+button.b.g{background:var(--green)}button.b.r{background:var(--red)}button.b.a{background:var(--amber)}button.b.s{background:#475569}
+button.b.sm{padding:4px 8px;font-size:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+input[type=number]{width:90px;padding:7px;border:1px solid var(--line);border-radius:6px}
+.scen{display:grid;gap:8px}
+.scen .it{display:flex;gap:8px;align-items:flex-start}
+.scen .it .n{background:var(--head);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none;margin-top:6px}
+.scen .it button{flex:none;width:170px;text-align:left}
+.scen .it span{color:var(--muted);font-size:12px;line-height:1.3;padding-top:2px}
+.log{max-height:170px;overflow:auto;font-family:Consolas,monospace;font-size:12px;background:#0f172a;color:#cbd5e1;border-radius:8px;padding:8px}
+.log div{padding:2px 0;border-bottom:1px solid #1e293b}
+.c200{color:#4ade80}.c400{color:#fbbf24}.c409{color:#fb923c}.c500{color:#f87171}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+th{background:#f1f5f9;font-size:12px;color:var(--muted)}
+.tag{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff}
+.tag.CRITICA{background:var(--red)}.tag.ALTA{background:var(--amber)}.tag.on{background:var(--red)}.tag.off{background:var(--green)}
+canvas{width:100%;height:190px;display:block}
+.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media(max-width:900px){.charts{grid-template-columns:1fr}}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.scroll{max-height:260px;overflow:auto}
+
+/* ---------- animaciones del esquema ---------- */
+.flow{stroke-dasharray:10 8;opacity:0}
+.flow.on{opacity:1;animation:dash .6s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-18}}
+.spin{animation:spin 0.9s linear infinite;transform-box:fill-box;transform-origin:center}
+.paused{animation-play-state:paused}
+@keyframes spin{to{transform:rotate(360deg)}}
+.wave{animation:wave 3s linear infinite}
+@keyframes wave{to{transform:translateX(-80px)}}
+.drop{animation:drop 1s linear infinite;opacity:0}
+.drop.on{opacity:1}
+@keyframes drop{0%{transform:translateY(0)}100%{transform:translateY(26px);opacity:0}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>B02 · Estación de bombeo automatizada<small>Gemelo digital industrial · Dashboard HTML/JS que consume la API REST de Node-RED</small></h1>
+  <div class="conn">
+    <span><span class="dot" id="dot"></span><span id="connTxt">Conectando…</span></span>
+    <label>API: <input id="baseUrl" value="http://localhost:1880"></label>
+    <label>Polling: <select id="pollSel"><option value="1000">1 s</option><option value="2000" selected>2 s</option><option value="5000">5 s</option></select></label>
+    <span id="lastUpd">—</span>
+  </div>
+</header>
+
+<nav>
+  <button id="tabOp" class="act" onclick="setView('op')">Vista de Operación</button>
+  <button id="tabEng" onclick="setView('eng')">Vista de Ingeniería</button>
+</nav>
+
+<main>
+<div id="bannerErr" class="banner"></div>
+<div id="bannerAlm" class="banner"></div>
+
+<!-- =============== VISTA DE OPERACIÓN =============== -->
+<section id="vOp" class="view act">
+ <div class="grid2">
+  <div>
+   <div class="card">
+    <h3>Esquema del proceso</h3>
+    <svg viewBox="0 0 820 420" width="100%" id="svg">
+      <defs><clipPath id="tankClip"><rect x="330" y="60" width="220" height="300" rx="6"/></clipPath></defs>
+      <!-- fuente -->
+      <rect x="10" y="110" width="60" height="220" rx="6" fill="#bae6fd" stroke="#0284c7"/>
+      <text x="40" y="225" text-anchor="middle" font-size="12" fill="#075985" transform="rotate(-90 40 225)">FUENTE</text>
+      <!-- tuberías -->
+      <line x1="70" y1="160" x2="156" y2="160" stroke="#94a3b8" stroke-width="12"/>
+      <line x1="70" y1="300" x2="156" y2="300" stroke="#94a3b8" stroke-width="12"/>
+      <line x1="224" y1="160" x2="330" y2="160" stroke="#94a3b8" stroke-width="12"/>
+      <line x1="224" y1="300" x2="330" y2="300" stroke="#94a3b8" stroke-width="12"/>
+      <line id="fl1a" class="flow" x1="70" y1="160" x2="156" y2="160" stroke="#38bdf8" stroke-width="5"/>
+      <line id="fl1b" class="flow" x1="224" y1="160" x2="330" y2="160" stroke="#38bdf8" stroke-width="5"/>
+      <line id="fl2a" class="flow" x1="70" y1="300" x2="156" y2="300" stroke="#38bdf8" stroke-width="5"/>
+      <line id="fl2b" class="flow" x1="224" y1="300" x2="330" y2="300" stroke="#38bdf8" stroke-width="5"/>
+      <!-- tanque -->
+      <rect x="330" y="60" width="220" height="300" rx="6" fill="#f8fafc"/>
+      <g clip-path="url(#tankClip)">
+        <g id="water" style="transform:translateY(300px);transition:transform 1.5s linear">
+          <rect x="330" y="0" width="220" height="320" fill="#38bdf8" opacity=".85" id="waterRect"/>
+          <path id="wavePath" class="wave" fill="#7dd3fc" opacity=".9"/>
+        </g>
+      </g>
+      <rect x="330" y="60" width="220" height="300" rx="6" fill="none" stroke="#334155" stroke-width="4"/>
+      <!-- escala -->
+      <g font-size="11" fill="#475569">
+        <line x1="550" y1="60" x2="558" y2="60" stroke="#475569"/><text x="562" y="64">100%</text>
+        <line x1="550" y1="135" x2="558" y2="135" stroke="#475569"/><text x="562" y="139">75%</text>
+        <line x1="550" y1="210" x2="558" y2="210" stroke="#475569"/><text x="562" y="214">50%</text>
+        <line x1="550" y1="285" x2="558" y2="285" stroke="#475569"/><text x="562" y="289">25%</text>
+        <line x1="550" y1="360" x2="558" y2="360" stroke="#475569"/><text x="562" y="364">0%</text>
+      </g>
+      <!-- setpoint -->
+      <line id="spLine" x1="330" x2="550" y1="165" y2="165" stroke="#f59e0b" stroke-width="3" stroke-dasharray="8 5"/>
+      <text id="spTxt" x="336" y="158" font-size="12" font-weight="700" fill="#b45309">SP 65%</text>
+      <text id="lvlTxt" x="440" y="215" text-anchor="middle" font-size="40" font-weight="700" fill="#0f172a" stroke="#fff" stroke-width="4" paint-order="stroke">--%</text>
+      <text id="volTxt" x="440" y="238" text-anchor="middle" font-size="13" fill="#0f172a" stroke="#fff" stroke-width="3" paint-order="stroke">-- L</text>
+      <!-- salida -->
+      <line x1="550" y1="335" x2="720" y2="335" stroke="#94a3b8" stroke-width="12"/>
+      <line id="flOut" class="flow" x1="550" y1="335" x2="720" y2="335" stroke="#38bdf8" stroke-width="5"/>
+      <polygon points="720,320 750,335 720,350" fill="#64748b"/>
+      <text x="640" y="312" text-anchor="middle" font-size="12" fill="#334155">CONSUMO</text>
+      <text id="outTxt" x="640" y="368" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">-- L/min</text>
+      <!-- fuga -->
+      <g id="leakG">
+        <circle class="drop" cx="420" cy="368" r="4" fill="#0284c7"/>
+        <circle class="drop" cx="440" cy="368" r="4" fill="#0284c7" style="animation-delay:.3s"/>
+        <circle class="drop" cx="460" cy="368" r="4" fill="#0284c7" style="animation-delay:.6s"/>
+        <text id="leakTxt" x="440" y="410" text-anchor="middle" font-size="12" font-weight="700" fill="#b91c1c"></text>
+      </g>
+      <!-- bombas -->
+      <g id="pump1">
+        <circle cx="190" cy="160" r="34" fill="#94a3b8" stroke="#334155" stroke-width="3" class="pbody"/>
+        <g class="spin paused imp"><path d="M190 135 L198 160 L190 185 L182 160 Z" fill="#fff"/><path d="M165 160 L190 152 L215 160 L190 168 Z" fill="#fff"/></g>
+        <text x="190" y="216" text-anchor="middle" font-size="13" font-weight="700">BOMBA 1</text>
+        <text class="pst" x="190" y="232" text-anchor="middle" font-size="12" fill="#475569">--</text>
+        <text class="pmain" x="190" y="108" text-anchor="middle" font-size="12" font-weight="700" fill="#b45309"></text>
+      </g>
+      <g id="pump2">
+        <circle cx="190" cy="300" r="34" fill="#94a3b8" stroke="#334155" stroke-width="3" class="pbody"/>
+        <g class="spin paused imp"><path d="M190 275 L198 300 L190 325 L182 300 Z" fill="#fff"/><path d="M165 300 L190 292 L215 300 L190 308 Z" fill="#fff"/></g>
+        <text x="190" y="356" text-anchor="middle" font-size="13" font-weight="700">BOMBA 2</text>
+        <text class="pst" x="190" y="372" text-anchor="middle" font-size="12" fill="#475569">--</text>
+        <text class="pmain" x="190" y="248" text-anchor="middle" font-size="12" font-weight="700" fill="#b45309"></text>
+      </g>
+    </svg>
+   </div>
+
+   <div class="card">
+    <h3>Mando de bombas y nivel objetivo</h3>
+    <div class="row" style="margin-bottom:10px">
+      <b style="width:70px">Bomba 1</b>
+      <button class="b g" onclick="cmd('START_PUMP',1)">▶ Arrancar</button>
+      <button class="b r" onclick="cmd('STOP_PUMP',1)">■ Detener</button>
+    </div>
+    <div class="row" style="margin-bottom:10px">
+      <b style="width:70px">Bomba 2</b>
+      <button class="b g" onclick="cmd('START_PUMP',2)">▶ Arrancar</button>
+      <button class="b r" onclick="cmd('STOP_PUMP',2)">■ Detener</button>
+    </div>
+    <div class="row" style="margin-bottom:10px">
+      <button class="b s" onclick="cmd('TOGGLE_MAIN')">⇄ Alternar bomba principal</button>
+    </div>
+    <div class="row">
+      <b>Setpoint (%)</b>
+      <input type="number" id="spInput" min="0" max="100" step="1" value="65">
+      <button class="b" onclick="setSetpoint()">Aplicar (PUT)</button>
+      <span style="color:var(--muted);font-size:12px">Prueba también 150 para ver el error 400</span>
+    </div>
+   </div>
+  </div>
+
+  <div>
+   <div class="card">
+    <h3>Telemetría en vivo</h3>
+    <div class="cards4">
+      <div class="kv"><div class="l">Nivel</div><div class="v" id="tNivel">--<span class="u"> %</span></div></div>
+      <div class="kv"><div class="l">Caudal de entrada</div><div class="v" id="tCaudal">--<span class="u"> L/min</span></div></div>
+      <div class="kv"><div class="l">Presión</div><div class="v" id="tPres">--<span class="u"> bar</span></div></div>
+      <div class="kv"><div class="l">Potencia</div><div class="v" id="tPot">--<span class="u"> kW</span></div></div>
+    </div>
+   </div>
+
+   <div class="card">
+    <h3>Simulación de fallas (pruebas de aceptación)</h3>
+    <div class="scen">
+      <div class="it"><div class="n">1</div><button class="b g" onclick="scen(1)">Llenado normal</button><span>Tanque al 30%. Las 2 bombas arrancan, el nivel sube a 65% y se estabiliza.</span></div>
+      <div class="it"><div class="n">2</div><button class="b a" onclick="scen(2)">Aumento de consumo</button><span>Sube la demanda: más caudal, nivel baja, entra la 2.ª bomba, sube la potencia.</span></div>
+      <div class="it"><div class="n">3</div><button class="b a" onclick="scen(3)">Fuga en el tanque</button><span>Se pierde agua: baja la eficiencia volumétrica y trabajan más las bombas.</span></div>
+      <div class="it"><div class="n">4</div><button class="b r" onclick="scen(4)">Bomba averiada</button><span>La bomba principal se avería: la otra asume. Arrancarla da error 409.</span></div>
+      <div class="it"><div class="n">5</div><button class="b s" onclick="scen(5)">Recuperación</button><span>Quita fugas y averías, SP a 65%, bombas habilitadas. Alarmas se normalizan.</span></div>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
+    <div class="btns">
+      <button class="b sm r" onclick="scen(6)">Extra: falla grave → nivel bajo / seco</button>
+      <button class="b sm a" onclick="scen(7)">Extra: sobrepresión</button>
+    </div>
+    <div id="scenInfo" style="margin-top:10px;font-size:12px;color:var(--muted)">Pulsa un escenario y observa el esquema, los KPI y las alarmas.</div>
+   </div>
+
+   <div class="card">
+    <h3>Respuestas HTTP de las órdenes enviadas</h3>
+    <div class="log" id="cmdLog"><div>(aún no se envían órdenes)</div></div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- =============== VISTA DE INGENIERÍA =============== -->
+<section id="vEng" class="view">
+  <div class="card" style="margin-top:14px">
+    <div class="row">
+      <h3 style="margin:0">KPIs</h3>
+      <span style="color:var(--muted);font-size:12px">Calculados por Node-RED en cada ciclo de simulación</span>
+    </div>
+    <div class="kpis" style="margin-top:10px">
+      <div class="kv"><div class="l">Volumen bombeado</div><div class="v" id="kVol">--<span class="u"> m³</span></div><div class="f">Σ caudal·Δt / 1000</div></div>
+      <div class="kv"><div class="l">Energía consumida</div><div class="v" id="kEn">--<span class="u"> kWh</span></div><div class="f">Σ potencia·Δt / 3600</div></div>
+      <div class="kv"><div class="l">Tiempo activo bombas</div><div class="v" id="kAct">--<span class="u"> %</span></div><div class="f">seg-bomba en marcha / (2·t total)</div></div>
+      <div class="kv"><div class="l">Error de nivel</div><div class="v" id="kErr">--<span class="u"> %</span></div><div class="f">nivel − setpoint</div></div>
+      <div class="kv"><div class="l">Eficiencia volumétrica</div><div class="v" id="kEf">--<span class="u"> %</span></div><div class="f">(bombeado − fugado) / bombeado</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <h3 style="margin:0">Históricos</h3>
+      <label>Ventana:
+        <select id="winSel" onchange="refreshEng()">
+          <option value="60">1 min</option><option value="300" selected>5 min</option>
+          <option value="900">15 min</option><option value="1800">30 min</option><option value="3600">60 min</option>
+        </select>
+      </label>
+      <span id="histInfo" style="color:var(--muted);font-size:12px"></span>
+    </div>
+    <div class="charts" style="margin-top:10px">
+      <div><b>Nivel (%) y setpoint</b><canvas id="chNivel"></canvas></div>
+      <div><b>Presión (bar)</b><canvas id="chPres"></canvas></div>
+      <div><b>Caudal de entrada (L/min)</b><canvas id="chCaud"></canvas></div>
+      <div><b>Potencia (kW)</b><canvas id="chPot"></canvas></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <h3 style="margin:0">Alarmas</h3>
+      <button class="b sm" onclick="ackAll()">Reconocer todas</button>
+    </div>
+    <div class="scroll" style="margin-top:8px">
+    <table>
+      <thead><tr><th>Inicio</th><th>Código</th><th>Severidad</th><th>Valor / umbral</th><th>Estado</th><th>Reconocida</th><th></th></tr></thead>
+      <tbody id="alBody"><tr><td colspan="7">Sin alarmas registradas</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <div class="charts">
+    <div class="card">
+      <h3>Últimas muestras del histórico</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>Hora</th><th>Nivel %</th><th>Presión bar</th><th>Caudal L/min</th><th>Potencia kW</th></tr></thead>
+        <tbody id="hBody"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Auditoría de solicitudes de control</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>Hora</th><th>Endpoint</th><th>HTTP</th><th>ms</th><th>Detalle</th></tr></thead>
+        <tbody id="auBody"></tbody></table></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+/* =========================================================
+   CONFIGURACIÓN
+   ========================================================= */
+let POLL_MS = 2000;          // intervalo de polling (declarado: 2 s por defecto)
+const TIMEOUT_MS = 4000;     // timeout de cada petición fetch
+let view = 'op';
+let lastStatus = null;       // último /status recibido
+let pollTimer = null;
+let failCount = 0;
+let lastAlHtml = '';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hora = iso => new Date(iso).toLocaleTimeString('es-EC');
+const base = () => $('baseUrl').value.replace(/\/+$/, '');
+
+/* =========================================================
+   CAPA DE ACCESO A LA API (fetch con timeout)
+   ========================================================= */
+async function api(path, opt = {}) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const init = { method: opt.method || 'GET', signal: ctrl.signal };
+  if (opt.body !== undefined) {              // Content-Type solo cuando hay cuerpo
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify(opt.body);
+  }
+  const t0 = performance.now();
+  try {
+    const r = await fetch(base() + path, init);
+    let data = {};
+    try { data = await r.json(); } catch (e) {}
+    return { ok: r.ok, status: r.status, data, ms: Math.round(performance.now() - t0) };
+  } finally { clearTimeout(to); }
+}
+
+/* =========================================================
+   POLLING (cada POLL_MS)
+   ========================================================= */
+async function poll() {
+  clearTimeout(pollTimer);
+  try {
+    const [tel, st, kp, al] = await Promise.all([
+      api('/api/B02/telemetry'), api('/api/B02/status'), api('/api/B02/kpis'), api('/api/B02/alarms')
+    ]);
+    if (tel.status === 503) throw new Error('Simulador no inicializado en Node-RED');
+    renderTelemetry(tel.data); renderStatus(st.data); renderKpis(kp.data); renderAlarms(al.data);
+    if (view === 'eng') await refreshEng(false);
+    setConn(true);
+  } catch (e) {
+    setConn(false, e.name === 'AbortError' ? 'Timeout: la API no responde' : (e.message === 'Failed to fetch' ? 'Sin conexión con la API (¿Node-RED encendido? ¿CORS?)' : e.message));
+  }
+  pollTimer = setTimeout(poll, POLL_MS);
+}
+function setConn(ok, msg) {
+  $('dot').className = 'dot ' + (ok ? 'ok' : 'bad');
+  $('connTxt').textContent = ok ? 'Conectado' : 'Desconectado';
+  const b = $('bannerErr');
+  if (ok) { failCount = 0; b.className = 'banner'; b.textContent = ''; $('lastUpd').textContent = 'Última lectura: ' + new Date().toLocaleTimeString('es-EC'); }
+  else { failCount++; b.className = 'banner err'; b.textContent = '⚠ ' + msg + ' — reintentando… (' + failCount + ')'; }
+}
+
+/* =========================================================
+   RENDER VISTA DE OPERACIÓN
+   ========================================================= */
+function initWave() {
+  let d = 'M330 0'; for (let x = 0; x <= 400; x += 5) d += ' L' + (330 + x) + ' ' + (-4 + 4 * Math.sin(x / 12.7));
+  d += ' L730 12 L330 12 Z'; $('wavePath').setAttribute('d', d);
+}
+function renderTelemetry(t) {
+  const nivel = t.nivel_pct;
+  $('tNivel').innerHTML = nivel.toFixed(1) + '<span class="u"> %</span>';
+  $('tCaudal').innerHTML = t.caudal_lpm.toFixed(1) + '<span class="u"> L/min</span>';
+  $('tPres').innerHTML = t.presion_bar.toFixed(2) + '<span class="u"> bar</span>';
+  $('tPot').innerHTML = t.potencia_kw.toFixed(2) + '<span class="u"> kW</span>';
+  // tanque: 0% -> y=360, 100% -> y=60 (alto 300 px)
+  $('water').style.transform = 'translateY(' + (60 + 300 * (1 - nivel / 100)).toFixed(1) + 'px)';
+  $('waterRect').setAttribute('fill', nivel < 20 ? '#f87171' : '#38bdf8');
+  $('lvlTxt').textContent = nivel.toFixed(0) + '%';
+  $('volTxt').textContent = Math.round(t.volumen_l) + ' L de 2000 L';
+  const ySp = 60 + 300 * (1 - t.setpoint_pct / 100);
+  $('spLine').setAttribute('y1', ySp); $('spLine').setAttribute('y2', ySp);
+  $('spTxt').setAttribute('y', Math.max(74, ySp - 6)); $('spTxt').textContent = 'SP ' + t.setpoint_pct + '%';
+  $('outTxt').textContent = t.caudal_salida_lpm.toFixed(0) + ' L/min';
+  $('flOut').classList.toggle('on', t.caudal_salida_lpm > 1);
+  const fuga = t.fuga_lpm > 1;
+  document.querySelectorAll('#leakG .drop').forEach(c => c.classList.toggle('on', fuga));
+  $('leakTxt').textContent = fuga ? 'FUGA ' + t.fuga_lpm.toFixed(0) + ' L/min' : '';
+  if (document.activeElement !== $('spInput') && !$('spInput').dataset.touched) $('spInput').value = t.setpoint_pct;
+}
+function renderStatus(s) {
+  lastStatus = s;
+  s.bombas.forEach(b => {
+    const g = $('pump' + b.id);
+    const col = b.averia ? '#ef4444' : (b.encendida ? '#22c55e' : (b.habilitada ? '#cbd5e1' : '#94a3b8'));
+    g.querySelector('.pbody').setAttribute('fill', col);
+    g.querySelector('.imp').classList.toggle('paused', !b.encendida);
+    const txt = { EN_MARCHA: 'EN MARCHA', EN_ESPERA: 'En espera (auto)', DETENIDA: 'Detenida', AVERIADA: 'AVERIADA ✖' }[b.estado];
+    g.querySelector('.pst').textContent = txt;
+    g.querySelector('.pst').setAttribute('fill', b.averia ? '#b91c1c' : (b.encendida ? '#15803d' : '#475569'));
+    g.querySelector('.pmain').textContent = b.principal ? '★ PRINCIPAL' : '';
+    $('fl' + b.id + 'a').classList.toggle('on', b.encendida);
+    $('fl' + b.id + 'b').classList.toggle('on', b.encendida);
+  });
+}
+function renderAlarms(a) {
+  const ban = $('bannerAlm');
+  if (a.activas > 0) {
+    const nombres = a.alarmas.filter(x => x.activa).map(x => x.codigo.replace(/_/g, ' ')).join(' · ');
+    ban.className = 'banner alm'; ban.textContent = '🔔 ' + a.activas + ' alarma(s) activa(s): ' + nombres;
+  } else { ban.className = 'banner'; ban.textContent = ''; }
+  renderAlarmTable(a.alarmas);
+}
+
+/* =========================================================
+   RENDER VISTA DE INGENIERÍA
+   ========================================================= */
+function renderKpis(k) {
+  const x = k.kpis;
+  $('kVol').innerHTML = x.volumen_bombeado_m3.toFixed(3) + '<span class="u"> m³</span>';
+  $('kEn').innerHTML = x.energia_kwh.toFixed(3) + '<span class="u"> kWh</span>';
+  $('kAct').innerHTML = x.tiempo_activo_pct.toFixed(1) + '<span class="u"> %</span>';
+  $('kErr').innerHTML = x.error_nivel_pct.toFixed(1) + '<span class="u"> %</span>';
+  $('kEf').innerHTML = x.eficiencia_volumetrica_pct.toFixed(1) + '<span class="u"> %</span>';
+}
+function renderAlarmTable(list) {
+  if (!list || !list.length) { $('alBody').innerHTML = '<tr><td colspan="7">Sin alarmas registradas</td></tr>'; lastAlHtml = ''; return; }
+  const html = list.map(a => `<tr>
+    <td>${hora(a.tsInicio)}</td><td>${esc(a.codigo)}</td>
+    <td><span class="tag ${esc(a.severidad)}">${esc(a.severidad)}</span></td>
+    <td>${a.valor} ${esc(a.unidad)} / ${a.umbral} ${esc(a.unidad)}</td>
+    <td><span class="tag ${a.activa ? 'on' : 'off'}">${a.activa ? 'ACTIVA' : 'NORMALIZADA'}</span></td>
+    <td>${a.reconocida ? '✔ ' + hora(a.tsReconocida) : '—'}</td>
+    <td>${a.reconocida ? '' : `<button class="b sm" onclick="ack('${esc(a.id)}')">Reconocer</button>`}</td></tr>`).join('');
+  if (html !== lastAlHtml) { $('alBody').innerHTML = html; lastAlHtml = html; }
+}
+async function refreshEng(standalone = true) {
+  const w = $('winSel').value;
+  const [h, au] = await Promise.all([api('/api/B02/history?window=' + w), api('/api/B02/audit')]);
+  const d = h.data;
+  $('histInfo').textContent = d.muestras + ' muestras (1 cada ' + d.intervalo_s + ' s)';
+  const sp = lastStatus ? lastStatus.setpoint_pct : null;
+  drawChart($('chNivel'), d.t, d.nivel_pct, { color: '#2563eb', min: 0, max: 100, ref: sp, unit: '%' });
+  drawChart($('chPres'), d.t, d.presion_bar, { color: '#dc2626', min: 0, max: 7, ref: 5, refLabel: 'límite 5 bar', unit: 'bar' });
+  drawChart($('chCaud'), d.t, d.caudal_lpm, { color: '#0d9488', min: 0, max: 180, unit: 'L/min' });
+  drawChart($('chPot'), d.t, d.potencia_kw, { color: '#9333ea', min: 0, max: null, unit: 'kW' });
+  const n = d.t.length, rows = [];
+  for (let i = n - 1; i >= Math.max(0, n - 12); i--)
+    rows.push(`<tr><td>${hora(d.t[i])}</td><td>${d.nivel_pct[i]}</td><td>${d.presion_bar[i]}</td><td>${d.caudal_lpm[i]}</td><td>${d.potencia_kw[i]}</td></tr>`);
+  $('hBody').innerHTML = rows.join('') || '<tr><td colspan="5">Sin datos</td></tr>';
+  const regs = au.data.registros || [];
+  $('auBody').innerHTML = regs.map(r => `<tr><td>${hora(r.ts)}</td><td>${esc(r.endpoint)}</td><td class="${codeClass(r.codigo)}"><b>${r.codigo}</b></td><td>${r.tiempo_ms}</td><td>${esc(r.detalle)}</td></tr>`).join('') || '<tr><td colspan="5">Sin solicitudes de control todavía</td></tr>';
+}
+const codeClass = c => c < 300 ? 'c200' : c === 409 ? 'c409' : c < 500 ? 'c400' : 'c500';
+
+/* ---------- gráfico de líneas en canvas (sin librerías) ---------- */
+function drawChart(cv, ts, ys, o) {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext('2d'); c.scale(dpr, dpr); c.clearRect(0, 0, W, H);
+  const L = 44, Rr = 12, T = 10, B = 22, pw = W - L - Rr, ph = H - T - B;
+  if (!ys || ys.length < 2) { c.fillStyle = '#64748b'; c.font = '13px sans-serif'; c.fillText('Esperando datos del histórico…', L + 10, H / 2); return; }
+  let mn = o.min, mx = o.max;
+  if (mx === null || mx === undefined) mx = Math.max(1, Math.ceil(Math.max(...ys) * 1.2));
+  if (mn === null || mn === undefined) mn = Math.min(...ys);
+  const X = i => L + pw * i / (ys.length - 1), Y = v => T + ph * (1 - (v - mn) / (mx - mn));
+  c.font = '11px sans-serif'; c.strokeStyle = '#e2e8f0'; c.fillStyle = '#64748b'; c.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const v = mn + (mx - mn) * k / 4, y = Y(v);
+    c.beginPath(); c.moveTo(L, y); c.lineTo(W - Rr, y); c.stroke();
+    c.fillText(v.toFixed(mx > 20 ? 0 : 1), 4, y + 4);
+  }
+  const f = new Date(ts[0]).toLocaleTimeString('es-EC'), l = new Date(ts[ts.length - 1]).toLocaleTimeString('es-EC');
+  c.fillText(f, L, H - 6); c.textAlign = 'right'; c.fillText(l, W - Rr, H - 6); c.textAlign = 'left';
+  if (o.ref !== null && o.ref !== undefined) {
+    c.strokeStyle = '#f59e0b'; c.setLineDash([6, 4]); c.beginPath(); c.moveTo(L, Y(o.ref)); c.lineTo(W - Rr, Y(o.ref)); c.stroke(); c.setLineDash([]);
+    c.fillStyle = '#b45309'; c.fillText(o.refLabel || ('SP ' + o.ref + o.unit), L + 4, Y(o.ref) - 4);
+  }
+  c.strokeStyle = o.color; c.lineWidth = 2; c.beginPath();
+  ys.forEach((v, i) => { const x = X(i), y = Y(Math.min(mx, Math.max(mn, v))); i ? c.lineTo(x, y) : c.moveTo(x, y); });
+  c.stroke();
+}
+
+/* =========================================================
+   ÓRDENES DE CONTROL (POST / PUT)
+   ========================================================= */
+function logCmd(txt, r) {
+  const d = document.createElement('div');
+  const cls = codeClass(r.status);
+  d.innerHTML = `${new Date().toLocaleTimeString('es-EC')} <span class="${cls}"><b>HTTP ${r.status}</b></span> ${esc(txt)} → ${esc(r.data.error || r.data.mensaje || '')} <span style="opacity:.6">(${r.ms} ms)</span>`;
+  const box = $('cmdLog'); if (box.firstChild && box.firstChild.textContent.startsWith('(aún')) box.innerHTML = '';
+  box.prepend(d); while (box.children.length > 40) box.removeChild(box.lastChild);
+}
+async function send(label, path, method, body) {
+  try { const r = await api(path, { method, body }); logCmd(label, r); poll(); return r; }
+  catch (e) { logCmd(label, { status: 0, ms: 0, data: { error: 'Sin respuesta (timeout o red)' } }); }
+}
+const cmd = (command, pumpId) => send('POST commands ' + command + (pumpId ? ' bomba ' + pumpId : ''), '/api/B02/commands', 'POST', pumpId ? { command, pumpId } : { command });
+function setSetpoint() { const v = $('spInput').value; $('spInput').dataset.touched = '1'; send('PUT setpoint ' + v, '/api/B02/setpoint', 'PUT', { setpoint: v === '' ? null : Number(v) }).then(() => { delete $('spInput').dataset.touched; }); }
+const dist = (type, pumpId) => send('POST disturbance ' + type, '/api/B02/disturbance', 'POST', pumpId ? { type, pumpId } : { type });
+async function ack(id) { await send('POST alarms/ack', '/api/B02/alarms/ack', 'POST', { id }); refreshEng(); }
+async function ackAll() { await send('POST alarms/ack (todas)', '/api/B02/alarms/ack', 'POST', { all: true }); refreshEng(); }
+
+/* ---------- Escenarios de aceptación ---------- */
+const INFO = {
+  1: 'Esperado: nivel sube de 30% a ~65%, 2 bombas en marcha al inicio, luego 1 bomba cicla. Presión ≈ 4–5 bar, potencia ≈ 2.5 kW.',
+  2: 'Esperado: el consumo pasa de ~50 a ~110 L/min. El nivel baja unos puntos, entra la 2.ª bomba (caudal 160 L/min) y la potencia sube.',
+  3: 'Esperado: aparece FUGA en el esquema, eficiencia volumétrica baja (<85%), bombas con más tiempo activo.',
+  4: 'Esperado: la bomba principal queda en rojo (AVERIADA), la otra asume. Intenta «Arrancar» esa bomba: HTTP 409.',
+  5: 'Esperado: bombas sanas, SP=65%, nivel vuelve al objetivo, alarmas pasan a NORMALIZADA.',
+  6: 'Esperado: nivel baja rápido → alarma NIVEL_BAJO (<20%) y luego FUNCIONAMIENTO_SECO. Se ve en la banda amarilla y en Ingeniería.',
+  7: 'Esperado: SP=95% con válvula casi cerrada → presión sube >5 bar → alarma SOBREPRESION.'
+};
+async function scen(n) {
+  $('scenInfo').textContent = '▶ Escenario ' + n + '. ' + INFO[n];
+  if (n === 1) await dist('NORMAL_FILL');
+  if (n === 2) await dist('CONSUMPTION_UP');
+  if (n === 3) await dist('LEAK');
+  if (n === 4) await dist('PUMP_FAULT', lastStatus ? lastStatus.bombaPrincipal : undefined);
+  if (n === 5) await dist('RECOVER');
+  if (n === 6) await dist('SEVERE');
+  if (n === 7) { await dist('RECOVER'); await send('PUT setpoint 95', '/api/B02/setpoint', 'PUT', { setpoint: 95 }); await dist('VALVE_CLOSED'); }
+}
+
+/* =========================================================
+   NAVEGACIÓN Y ARRANQUE
+   ========================================================= */
+function setView(v) {
+  view = v;
+  $('vOp').classList.toggle('act', v === 'op'); $('vEng').classList.toggle('act', v === 'eng');
+  $('tabOp').classList.toggle('act', v === 'op'); $('tabEng').classList.toggle('act', v === 'eng');
+  if (v === 'eng') refreshEng().catch(() => {});
+}
+$('pollSel').addEventListener('change', e => { POLL_MS = Number(e.target.value); poll(); });
+$('baseUrl').addEventListener('change', () => { try { localStorage.setItem('b02base', $('baseUrl').value); } catch (e) {} poll(); });
+$('spInput').addEventListener('input', () => { $('spInput').dataset.touched = '1'; });
+window.addEventListener('resize', () => { if (view === 'eng') refreshEng().catch(() => {}); });
+try { const b = localStorage.getItem('b02base'); if (b) $('baseUrl').value = b; } catch (e) {}
+initWave();
+poll();
+</script>
+</body>
+</html>

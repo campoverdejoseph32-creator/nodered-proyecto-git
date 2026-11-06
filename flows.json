@@ -49,7 +49,7 @@
         "id": "iReset",
         "type": "inject",
         "z": "b02tabSim",
-        "name": "REINICIAR TODO (borra contexto)",
+        "name": "REINICIAR TODO (borra ",
         "props": [
             {
                 "p": "payload"
@@ -62,7 +62,7 @@
         "topic": "",
         "payload": "{\"reset\":true}",
         "payloadType": "json",
-        "x": 190,
+        "x": 160,
         "y": 170,
         "wires": [
             [
