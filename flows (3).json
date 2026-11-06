@@ -1,0 +1,990 @@
+[
+    {
+        "id": "b02tabSim",
+        "type": "tab",
+        "label": "B02 · Simulador",
+        "disabled": false,
+        "info": "Modelo matematico de la estacion de bombeo: balance de masa, presion, potencia y perturbaciones."
+    },
+    {
+        "id": "b02tabApi",
+        "type": "tab",
+        "label": "B02 · API REST",
+        "disabled": false,
+        "info": "Endpoints /api/B02/* (http in + http response). Separado del simulador: solo lee/escribe el contexto."
+    },
+    {
+        "id": "b02tabKpi",
+        "type": "tab",
+        "label": "B02 · Historicos y KPIs",
+        "disabled": false,
+        "info": "KPIs, historico (ventana temporal) y alarmas. Todo se guarda en contexto global file-backed."
+    },
+    {
+        "id": "iInit",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "Inicializar al desplegar",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "0.5",
+        "topic": "",
+        "payload": "{}",
+        "payloadType": "json",
+        "x": 160,
+        "y": 120,
+        "wires": [
+            [
+                "fInit"
+            ]
+        ]
+    },
+    {
+        "id": "iReset",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "REINICIAR TODO (borra contexto)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"reset\":true}",
+        "payloadType": "json",
+        "x": 190,
+        "y": 170,
+        "wires": [
+            [
+                "fInit"
+            ]
+        ]
+    },
+    {
+        "id": "fInit",
+        "type": "function",
+        "z": "b02tabSim",
+        "name": "Inicializar contexto",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// INICIALIZAR CONTEXTO\n// Crea el estado inicial SOLO si no existe (asi se conserva lo guardado en disco al reiniciar).\n// Con msg.payload.reset = true borra todo y vuelve a empezar.\nconst force = !!(msg.payload && msg.payload.reset === true);\nif (force || !G('b02_state')) {\n  S('b02_state', {\n    volume: 800, level: 40, setpoint: 65, main: 1,\n    pumps: { 1: { enabled: true, fault: false, run: false }, 2: { enabled: true, fault: false, run: false } },\n    demandBase: 50, demandFactor: 1, leakLpm: 0, valveClosed: false,\n    flowIn: 0, flowOut: 0, demand: 0, leak: 0, pressure: 1.6, power: 0.05, dry: false,\n    t: 0, last: Date.now()\n  });\n  S('b02_kpi', { pumpedL: 0, leakedL: 0, energyKWh: 0, pumpSec: 0, totalSec: 0,\n    out: { volumen_bombeado_m3: 0, energia_kwh: 0, tiempo_activo_pct: 0, error_nivel_pct: 0, eficiencia_volumetrica_pct: 100 } });\n  S('b02_history', { t: [], nivel: [], presion: [], caudal: [], potencia: [], last: 0 });\n  S('b02_alarms', []);\n  S('b02_audit', []);\n  node.status({ fill: 'green', shape: 'dot', text: force ? 'Reinicio manual hecho' : 'Contexto creado' });\n  msg.payload = force ? 'Simulacion reiniciada (todo borrado)' : 'Contexto inicializado';\n} else {\n  node.status({ fill: 'blue', shape: 'ring', text: 'Contexto restaurado de disco' });\n  msg.payload = 'Estado restaurado desde el contexto file-backed';\n}\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 470,
+        "y": 140,
+        "wires": [
+            [
+                "dInit"
+            ]
+        ],
+        "info": "Crea nivel 40%, SP 65%, bomba 1 principal. Si ya hay datos guardados en disco los conserva."
+    },
+    {
+        "id": "dInit",
+        "type": "debug",
+        "z": "b02tabSim",
+        "name": "Debug: contexto",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 660,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "iTick",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "Reloj de simulacion (cada 1 s)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "2",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 280,
+        "wires": [
+            [
+                "fSim"
+            ]
+        ]
+    },
+    {
+        "id": "fSim",
+        "type": "function",
+        "z": "b02tabSim",
+        "name": "Simulador: balance de masa",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// SIMULADOR (se ejecuta cada 1 s)\n// 1) Control automatico de bombas con histeresis  2) Balance de masa  3) Presion y potencia\nconst s = G('b02_state');\nif (!s) { node.status({ fill: 'red', shape: 'ring', text: 'Sin estado: ejecuta Inicializar' }); return null; }\n\nconst CAP = 2000;   // capacidad del tanque (L)\nconst QP = 80;      // caudal nominal de cada bomba (L/min)\nconst now = Date.now();\nlet dt = (now - (s.last || now)) / 1000;   // paso real en segundos\nif (!(dt > 0)) dt = 1;\nif (dt > 5) dt = 5;\ns.last = now;\ns.t = (s.t || 0) + dt;\n\n// ---------- 1) CONTROL AUTOMATICO ----------\nconst av = id => s.pumps[id].enabled && !s.pumps[id].fault;   // bomba disponible\nconst otro = id => (id === 1 ? 2 : 1);\nlet prim = null, sec = null;   // bomba principal efectiva y de apoyo\nif (av(s.main)) { prim = s.main; if (av(otro(s.main))) sec = otro(s.main); }\nelse if (av(otro(s.main))) { prim = otro(s.main); }\n[1, 2].forEach(id => { if (!av(id)) s.pumps[id].run = false; });\nif (prim) {   // principal: arranca bajo SP-3, para al llegar a SP\n  const p = s.pumps[prim];\n  if (s.level < s.setpoint - 3) p.run = true; else if (s.level >= s.setpoint) p.run = false;\n}\nif (sec) {    // apoyo: arranca bajo SP-12, para sobre SP-6\n  const p = s.pumps[sec];\n  if (s.level < s.setpoint - 12) p.run = true; else if (s.level >= s.setpoint - 6) p.run = false;\n}\nconst nRun = (s.pumps[1].run ? 1 : 0) + (s.pumps[2].run ? 1 : 0);\n\n// ---------- 2) BALANCE DE MASA ----------\n// dV/dt = Qentrada - Qsalida     (Qsalida = consumo + fuga)\nconst flowIn = nRun * QP * (1 + (Math.random() - 0.5) * 0.02);                       // ruido +-1%\nconst base = s.demandBase + 15 * Math.sin(2 * Math.PI * s.t / 300) + (Math.random() - 0.5) * 4;\nconst factor = s.valveClosed ? 0.1 : s.demandFactor;\nconst demand = Math.max(0, base * factor);                                           // consumo (L/min)\nconst leak = (s.leakLpm > 0 && s.volume > 0) ? s.leakLpm * (0.5 + 0.5 * s.level / 100) : 0;\nconst want = demand + leak;\nconst maxOut = flowIn + s.volume / (dt / 60);   // no se puede sacar mas agua de la que hay\nconst ratio = want > maxOut ? maxOut / want : 1;\nconst outD = demand * ratio, outL = leak * ratio;\nconst flowOut = outD + outL;\nlet vol = s.volume + (flowIn - flowOut) * dt / 60;\nif (vol > CAP) vol = CAP;\nif (vol < 0) vol = 0;\nconst level = vol / CAP * 100;\n\n// ---------- 3) PRESION Y POTENCIA ----------\nconst dry = nRun > 0 && vol <= 20;                         // bombas activas sin agua\nconst surplus = Math.max(0, flowIn - flowOut);\nlet P = 1.0 + 0.015 * level + nRun * 1.0 + 0.007 * surplus - 0.002 * flowOut + (Math.random() - 0.5) * 0.08;\nif (dry) P *= 0.3;\nif (P < 0) P = 0;\nlet W = nRun > 0 ? (flowIn * P / 600) / 0.6 + 0.3 * nRun : 0.05;   // kW hidraulico / rendimiento 0.6\nif (dry) W *= 0.6;\n\n// ---------- Guardar estado ----------\ns.volume = vol; s.level = level;\ns.flowIn = flowIn; s.flowOut = flowOut; s.demand = outD; s.leak = outL;\ns.pressure = P; s.power = W; s.dry = dry;\nS('b02_state', s);\n\nmsg.payload = {\n  ts: now, iso: new Date(now).toISOString(), dt: dt,\n  level: level, volume: vol, flowIn: flowIn, flowOut: flowOut, demand: outD, leak: outL,\n  pressure: P, power: W, setpoint: s.setpoint, nRun: nRun, dry: dry,\n  run: { 1: s.pumps[1].run, 2: s.pumps[2].run }\n};\nnode.status({ fill: 'green', shape: 'dot', text: 'Nivel ' + level.toFixed(1) + '% | bombas: ' + nRun });\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 500,
+        "y": 280,
+        "wires": [
+            [
+                "lSimOut",
+                "dSim"
+            ]
+        ],
+        "info": "dV/dt = Qentrada - Qsalida. Control automatico con histeresis. Presion y potencia segun bombas y demanda."
+    },
+    {
+        "id": "dSim",
+        "type": "debug",
+        "z": "b02tabSim",
+        "name": "Debug: estado simulado",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload.level",
+        "targetType": "msg",
+        "statusVal": "payload.level",
+        "statusType": "auto",
+        "x": 790,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "lSimOut",
+        "type": "link out",
+        "z": "b02tabSim",
+        "name": "→ KPIs / Historico / Alarmas",
+        "mode": "link",
+        "links": [
+            "lSimIn"
+        ],
+        "x": 690,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "iP1",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "ESCENARIO: Llenado normal",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"type\": \"NORMAL_FILL\"}",
+        "payloadType": "json",
+        "x": 210,
+        "y": 440,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "iP2",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "FALLA: Aumento de consumo",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"type\": \"CONSUMPTION_UP\"}",
+        "payloadType": "json",
+        "x": 210,
+        "y": 485,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "iP3",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "FALLA: Fuga en tanque",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"type\": \"LEAK\"}",
+        "payloadType": "json",
+        "x": 210,
+        "y": 530,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "iP4",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "FALLA: Averia de bomba principal",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"type\": \"PUMP_FAULT\"}",
+        "payloadType": "json",
+        "x": 210,
+        "y": 575,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "iP5",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "FALLA: Valvula de salida cerrada",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"type\": \"VALVE_CLOSED\"}",
+        "payloadType": "json",
+        "x": 210,
+        "y": 620,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "iP6",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "FALLA: Falla grave (fuga+averia+consumo)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"type\": \"SEVERE\"}",
+        "payloadType": "json",
+        "x": 210,
+        "y": 665,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "iP7",
+        "type": "inject",
+        "z": "b02tabSim",
+        "name": "ESCENARIO: Recuperacion",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "0.1",
+        "topic": "",
+        "payload": "{\"type\": \"RECOVER\"}",
+        "payloadType": "json",
+        "x": 240,
+        "y": 720,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "fPert",
+        "type": "function",
+        "z": "b02tabSim",
+        "name": "Aplicar perturbacion",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// APLICAR PERTURBACION\n// Llega desde los inject manuales o desde la API (POST /api/B02/disturbance).\nconst s = G('b02_state');\nif (!s) return null;\nconst p = msg.payload || {};\nconst type = (typeof p === 'string') ? p : p.type;\nconst recuperar = () => {\n  s.demandFactor = 1; s.leakLpm = 0; s.valveClosed = false;\n  [1, 2].forEach(i => { s.pumps[i].fault = false; s.pumps[i].enabled = true; });\n  s.setpoint = 65;\n};\nlet txt = '';\nswitch (type) {\n  case 'CONSUMPTION_UP': s.demandFactor = 2.2; txt = 'Aumento de consumo (x2.2)'; break;\n  case 'LEAK': s.leakLpm = 100; txt = 'Fuga en el tanque (100 L/min a nivel lleno)'; break;\n  case 'PUMP_FAULT': {\n    const id = (p.pumpId === 1 || p.pumpId === 2) ? p.pumpId : s.main;\n    s.pumps[id].fault = true; s.pumps[id].run = false;\n    txt = 'Averia de la bomba ' + id; break;\n  }\n  case 'VALVE_CLOSED': s.valveClosed = true; txt = 'Valvula de salida casi cerrada (consumo x0.1)'; break;\n  case 'SEVERE':\n    s.demandFactor = 2.5; s.leakLpm = 150; s.volume = Math.min(s.volume, 500);\n    s.pumps[s.main].fault = true; s.pumps[s.main].run = false;\n    txt = 'Falla grave: fuga + consumo alto + bomba principal averiada'; break;\n  case 'RECOVER': recuperar(); txt = 'Recuperacion: fallas eliminadas, bombas habilitadas, SP=65%'; break;\n  case 'NORMAL_FILL': recuperar(); s.volume = 600; s.level = 30; txt = 'Llenado normal: tanque al 30%, condiciones normales'; break;\n  default: node.warn('Perturbacion desconocida: ' + type); return null;\n}\nS('b02_state', s);\nnode.status({ fill: 'yellow', shape: 'dot', text: txt });\nmsg.payload = txt;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 620,
+        "y": 560,
+        "wires": [
+            [
+                "dPert"
+            ]
+        ],
+        "info": "Modifica consumo, fuga, averias o recupera el sistema. Los valores aleatorios son solo ruido."
+    },
+    {
+        "id": "lPertIn",
+        "type": "link in",
+        "z": "b02tabSim",
+        "name": "← Perturbacion desde la API",
+        "links": [
+            "lPertOut"
+        ],
+        "x": 365,
+        "y": 780,
+        "wires": [
+            [
+                "fPert"
+            ]
+        ]
+    },
+    {
+        "id": "dPert",
+        "type": "debug",
+        "z": "b02tabSim",
+        "name": "Debug: perturbacion aplicada",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 880,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "hi_telemetry",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "GET /api/B02/telemetry",
+        "url": "/api/B02/telemetry",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 130,
+        "wires": [
+            [
+                "fn_telemetry"
+            ]
+        ]
+    },
+    {
+        "id": "fn_telemetry",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Armar JSON telemetry",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), deviceId: 'B02' }, obj);\n  return msg;\n};\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\n\n// GET /api/B02/telemetry\nreturn respond(200, {\n  nivel_pct: R(s.level, 1),\n  caudal_lpm: R(s.flowIn, 1),\n  caudal_salida_lpm: R(s.flowOut, 1),\n  presion_bar: R(s.pressure, 2),\n  potencia_kw: R(s.power, 2),\n  setpoint_pct: s.setpoint,\n  volumen_l: R(s.volume, 0),\n  consumo_lpm: R(s.demand, 1),\n  fuga_lpm: R(s.leak, 1),\n  unidades: { nivel: '%', caudal: 'L/min', presion: 'bar', potencia: 'kW', volumen: 'L' }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 130,
+        "wires": [
+            [
+                "rGet"
+            ]
+        ],
+        "info": "Telemetria: nivel, caudal, presion, potencia"
+    },
+    {
+        "id": "hi_status",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "GET /api/B02/status",
+        "url": "/api/B02/status",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 185,
+        "wires": [
+            [
+                "fn_status"
+            ]
+        ]
+    },
+    {
+        "id": "fn_status",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Armar JSON status",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), deviceId: 'B02' }, obj);\n  return msg;\n};\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\n\n// GET /api/B02/status\nconst al = G('b02_alarms') || [];\nreturn respond(200, {\n  modo: 'AUTOMATICO',\n  bombaPrincipal: s.main,\n  setpoint_pct: s.setpoint,\n  bombas: [1, 2].map(id => {\n    const p = s.pumps[id];\n    const estado = p.fault ? 'AVERIADA' : (p.run ? 'EN_MARCHA' : (p.enabled ? 'EN_ESPERA' : 'DETENIDA'));\n    return { id: id, estado: estado, encendida: !!p.run, habilitada: !!p.enabled, principal: s.main === id, averia: !!p.fault };\n  }),\n  perturbaciones: { consumoFactor: s.demandFactor, fuga_lpm: s.leakLpm, valvulaCerrada: !!s.valveClosed },\n  alarmasActivas: al.filter(a => a.activa).length\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 185,
+        "wires": [
+            [
+                "rGet"
+            ]
+        ],
+        "info": "Estado de bombas"
+    },
+    {
+        "id": "hi_kpis",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "GET /api/B02/kpis",
+        "url": "/api/B02/kpis",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 240,
+        "wires": [
+            [
+                "fn_kpis"
+            ]
+        ]
+    },
+    {
+        "id": "fn_kpis",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Armar JSON kpis",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), deviceId: 'B02' }, obj);\n  return msg;\n};\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\n\n// GET /api/B02/kpis\nconst k = G('b02_kpi');\nconst o = (k && k.out) || {};\nreturn respond(200, {\n  kpis: {\n    volumen_bombeado_m3: o.volumen_bombeado_m3 || 0,\n    energia_kwh: o.energia_kwh || 0,\n    tiempo_activo_pct: o.tiempo_activo_pct || 0,\n    error_nivel_pct: o.error_nivel_pct || 0,\n    eficiencia_volumetrica_pct: o.eficiencia_volumetrica_pct === undefined ? 100 : o.eficiencia_volumetrica_pct\n  },\n  formulas: {\n    volumen_bombeado_m3: 'suma(caudal_entrada * dt) / 1000',\n    energia_kwh: 'suma(potencia * dt) / 3600',\n    tiempo_activo_pct: 'segundos-bomba en marcha / (2 * tiempo total) * 100',\n    error_nivel_pct: 'nivel - setpoint',\n    eficiencia_volumetrica_pct: '(volumen bombeado - volumen fugado) / volumen bombeado * 100'\n  }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 240,
+        "wires": [
+            [
+                "rGet"
+            ]
+        ],
+        "info": "5 KPIs"
+    },
+    {
+        "id": "hi_history",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "GET /api/B02/history",
+        "url": "/api/B02/history",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 295,
+        "wires": [
+            [
+                "fn_history"
+            ]
+        ]
+    },
+    {
+        "id": "fn_history",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Armar JSON history",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), deviceId: 'B02' }, obj);\n  return msg;\n};\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\n\n// GET /api/B02/history?window=300   (ventana en segundos: 30 a 3600, por defecto 300)\nlet w = 300;\nconst q = (msg.req && msg.req.query) || {};\nif (q.window !== undefined) {\n  w = parseInt(q.window, 10);\n  if (isNaN(w) || w < 30 || w > 3600) return respond(400, { error: 'window debe ser un entero entre 30 y 3600 (segundos)' });\n}\nconst h = G('b02_history') || { t: [], nivel: [], presion: [], caudal: [], potencia: [] };\nconst desde = Date.now() - w * 1000;\nlet i = 0;\nwhile (i < h.t.length && h.t[i] < desde) i++;\nreturn respond(200, {\n  ventana_s: w, muestras: h.t.length - i, intervalo_s: 2,\n  t: h.t.slice(i).map(x => new Date(x).toISOString()),\n  nivel_pct: h.nivel.slice(i),\n  presion_bar: h.presion.slice(i),\n  caudal_lpm: h.caudal.slice(i),\n  potencia_kw: h.potencia.slice(i)\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 295,
+        "wires": [
+            [
+                "rGet"
+            ]
+        ],
+        "info": "Historico (query window=segundos)"
+    },
+    {
+        "id": "hi_alarms",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "GET /api/B02/alarms",
+        "url": "/api/B02/alarms",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 350,
+        "wires": [
+            [
+                "fn_alarms"
+            ]
+        ]
+    },
+    {
+        "id": "fn_alarms",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Armar JSON alarms",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), deviceId: 'B02' }, obj);\n  return msg;\n};\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\n\n// GET /api/B02/alarms   (las mas recientes primero)\nconst al = G('b02_alarms') || [];\nreturn respond(200, {\n  activas: al.filter(a => a.activa).length,\n  noReconocidas: al.filter(a => !a.reconocida).length,\n  alarmas: al.slice().reverse().slice(0, 50)\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 350,
+        "wires": [
+            [
+                "rGet"
+            ]
+        ],
+        "info": "Lista de alarmas"
+    },
+    {
+        "id": "hi_audit",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "GET /api/B02/audit",
+        "url": "/api/B02/audit",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 405,
+        "wires": [
+            [
+                "fn_audit"
+            ]
+        ]
+    },
+    {
+        "id": "fn_audit",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Armar JSON audit",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), deviceId: 'B02' }, obj);\n  return msg;\n};\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\n\n// GET /api/B02/audit   (bitacora de solicitudes de control: codigo HTTP y tiempo)\nconst a = G('b02_audit') || [];\nreturn respond(200, { total: a.length, registros: a.slice().reverse().slice(0, 30) });\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 405,
+        "wires": [
+            [
+                "rGet"
+            ]
+        ],
+        "info": "Bitacora de comandos"
+    },
+    {
+        "id": "rGet",
+        "type": "http response",
+        "z": "b02tabApi",
+        "name": "Responder (lecturas)",
+        "statusCode": "",
+        "headers": {},
+        "x": 690,
+        "y": 270,
+        "wires": []
+    },
+    {
+        "id": "hi_fn_cmd",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "POST /api/B02/commands",
+        "url": "/api/B02/commands",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 550,
+        "wires": [
+            [
+                "fn_cmd",
+                "dReq"
+            ]
+        ]
+    },
+    {
+        "id": "fn_cmd",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Validar y ejecutar commands",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// POST /api/B02/commands   { \"command\": \"START_PUMP\" | \"STOP_PUMP\" | \"TOGGLE_MAIN\", \"pumpId\": 1 | 2 }\nmsg._t0 = Date.now();\nmsg._ep = 'POST /api/B02/commands';\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg._detalle = obj.error || obj.mensaje || '';\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), ok: code === 200 }, obj);\n  return msg;\n};\nconst b = msg.payload;\nif (!b || typeof b !== 'object' || Array.isArray(b)) return respond(400, { error: 'El cuerpo debe ser un JSON con command y pumpId' });\nconst cmd = b.command, id = b.pumpId;\nconst permitidos = ['START_PUMP', 'STOP_PUMP', 'TOGGLE_MAIN'];\nif (!permitidos.includes(cmd)) return respond(400, { error: 'Comando invalido', permitidos: permitidos });\nconst idOk = (id === 1 || id === 2);\nif (cmd !== 'TOGGLE_MAIN' && !idOk) return respond(400, { error: 'pumpId debe ser 1 o 2' });\nif (cmd === 'TOGGLE_MAIN' && id !== undefined && !idOk) return respond(400, { error: 'pumpId debe ser 1 o 2' });\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\n\nif (cmd === 'START_PUMP') {\n  const p = s.pumps[id];\n  if (p.fault) return respond(409, { error: 'No se puede arrancar la bomba ' + id + ': esta averiada' });\n  if (p.enabled) return respond(409, { error: 'La bomba ' + id + ' ya esta habilitada' });\n  p.enabled = true;\n  S('b02_state', s);\n  return respond(200, { command: cmd, pumpId: id, mensaje: 'Bomba ' + id + ' habilitada (el control automatico la arranca segun el nivel)' });\n}\nif (cmd === 'STOP_PUMP') {\n  const p = s.pumps[id];\n  if (!p.enabled) return respond(409, { error: 'La bomba ' + id + ' ya esta detenida' });\n  p.enabled = false; p.run = false;\n  S('b02_state', s);\n  return respond(200, { command: cmd, pumpId: id, mensaje: 'Bomba ' + id + ' detenida' });\n}\n// TOGGLE_MAIN\nconst destino = idOk ? id : (s.main === 1 ? 2 : 1);\nif (destino === s.main) return respond(409, { error: 'La bomba ' + destino + ' ya es la principal' });\nif (s.pumps[destino].fault) return respond(409, { error: 'No se puede hacer principal la bomba ' + destino + ': esta averiada' });\ns.main = destino;\nS('b02_state', s);\nreturn respond(200, { command: cmd, pumpId: destino, mensaje: 'La bomba principal ahora es la ' + destino });\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 550,
+        "wires": [
+            [
+                "fAudit"
+            ]
+        ]
+    },
+    {
+        "id": "hi_fn_sp",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "PUT /api/B02/setpoint",
+        "url": "/api/B02/setpoint",
+        "method": "put",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 610,
+        "wires": [
+            [
+                "fn_sp",
+                "dReq"
+            ]
+        ]
+    },
+    {
+        "id": "fn_sp",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Validar y ejecutar setpoint",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// PUT /api/B02/setpoint   { \"setpoint\": 0..100 }\nmsg._t0 = Date.now();\nmsg._ep = 'PUT /api/B02/setpoint';\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg._detalle = obj.error || obj.mensaje || '';\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), ok: code === 200 }, obj);\n  return msg;\n};\nconst b = msg.payload;\nif (!b || typeof b !== 'object') return respond(400, { error: 'El cuerpo debe ser un JSON con setpoint' });\nconst raw = b.setpoint;\nconst v = (typeof raw === 'number') ? raw : ((typeof raw === 'string' && raw.trim() !== '') ? Number(raw) : NaN);\nif (!isFinite(v)) return respond(400, { error: 'setpoint debe ser un numero' });\nif (v < 0 || v > 100) return respond(400, { error: 'setpoint fuera de rango: debe estar entre 0 y 100', recibido: v });\nconst s = G('b02_state');\nif (!s) return respond(503, { error: 'Simulador no inicializado' });\ns.setpoint = v;\nS('b02_state', s);\nreturn respond(200, { setpoint_pct: v, mensaje: 'Nivel objetivo actualizado a ' + v + '%' });\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 610,
+        "wires": [
+            [
+                "fAudit"
+            ]
+        ]
+    },
+    {
+        "id": "hi_fn_ack",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "POST /api/B02/alarms/ack",
+        "url": "/api/B02/alarms/ack",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 670,
+        "wires": [
+            [
+                "fn_ack",
+                "dReq"
+            ]
+        ]
+    },
+    {
+        "id": "fn_ack",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Validar y ejecutar alarms/ack",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// POST /api/B02/alarms/ack   { \"id\": \"AL-...\" }  o  { \"all\": true }\nmsg._t0 = Date.now();\nmsg._ep = 'POST /api/B02/alarms/ack';\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg._detalle = obj.error || obj.mensaje || '';\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), ok: code === 200 }, obj);\n  return msg;\n};\nconst b = msg.payload;\nif (!b || typeof b !== 'object') return respond(400, { error: 'El cuerpo debe incluir id o all:true' });\nconst al = G('b02_alarms') || [];\nconst ahora = new Date().toISOString();\nlet n = 0;\nif (b.all === true) {\n  al.forEach(a => { if (!a.reconocida) { a.reconocida = true; a.tsReconocida = ahora; n++; } });\n} else if (typeof b.id === 'string') {\n  const a = al.find(x => x.id === b.id);\n  if (!a) return respond(404, { error: 'Alarma no encontrada', id: b.id });\n  if (!a.reconocida) { a.reconocida = true; a.tsReconocida = ahora; n = 1; }\n} else {\n  return respond(400, { error: 'Falta id (texto) o all:true' });\n}\nS('b02_alarms', al);\nreturn respond(200, { reconocidas: n, mensaje: n + ' alarma(s) reconocida(s)' });\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 670,
+        "wires": [
+            [
+                "fAudit"
+            ]
+        ]
+    },
+    {
+        "id": "hi_dist",
+        "type": "http in",
+        "z": "b02tabApi",
+        "name": "POST /api/B02/disturbance",
+        "url": "/api/B02/disturbance",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 730,
+        "wires": [
+            [
+                "fn_dist",
+                "dReq"
+            ]
+        ]
+    },
+    {
+        "id": "fn_dist",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Validar perturbacion",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// POST /api/B02/disturbance   { \"type\": \"...\", \"pumpId\": 1|2 (opcional) }\n// Salida 1 -> respuesta HTTP (pasa por auditoria)   Salida 2 -> simulador (link)\nmsg._t0 = Date.now();\nmsg._ep = 'POST /api/B02/disturbance';\nconst respond = (code, obj) => {\n  msg.statusCode = code;\n  msg._detalle = obj.error || obj.mensaje || '';\n  msg.payload = Object.assign({ timestamp: new Date().toISOString(), ok: code === 200 }, obj);\n  return [msg, null];\n};\nconst tipos = ['NORMAL_FILL', 'CONSUMPTION_UP', 'LEAK', 'PUMP_FAULT', 'VALVE_CLOSED', 'SEVERE', 'RECOVER'];\nconst b = msg.payload;\nif (!b || typeof b !== 'object' || !tipos.includes(b.type)) return respond(400, { error: 'Tipo de perturbacion invalido', permitidos: tipos });\nif (b.pumpId !== undefined && b.pumpId !== 1 && b.pumpId !== 2) return respond(400, { error: 'pumpId debe ser 1 o 2' });\nconst pedido = { payload: { type: b.type, pumpId: b.pumpId } };\nmsg.statusCode = 200;\nmsg._detalle = 'Perturbacion ' + b.type;\nmsg.payload = { timestamp: new Date().toISOString(), ok: true, type: b.type, mensaje: 'Perturbacion enviada al simulador' };\nreturn [msg, pedido];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 730,
+        "wires": [
+            [
+                "fAudit"
+            ],
+            [
+                "lPertOut"
+            ]
+        ],
+        "info": "Salida 1: respuesta HTTP. Salida 2: manda la perturbacion al simulador por un link."
+    },
+    {
+        "id": "lPertOut",
+        "type": "link out",
+        "z": "b02tabApi",
+        "name": "→ Simulador (perturbacion)",
+        "mode": "link",
+        "links": [
+            "lPertIn"
+        ],
+        "x": 700,
+        "y": 780,
+        "wires": []
+    },
+    {
+        "id": "fAudit",
+        "type": "function",
+        "z": "b02tabApi",
+        "name": "Auditoria: codigo y tiempo",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// AUDITORIA de solicitudes de control: guarda codigo HTTP y tiempo de ejecucion\nconst ms = Date.now() - (msg._t0 || Date.now());\nconst code = msg.statusCode || 200;\nconst entry = { ts: new Date().toISOString(), endpoint: msg._ep, codigo: code, tiempo_ms: ms, detalle: msg._detalle || '' };\nconst a = G('b02_audit') || [];\na.push(entry);\nS('b02_audit', a.length > 200 ? a.slice(-200) : a);\nif (msg.payload && typeof msg.payload === 'object') msg.payload.tiempo_ms = ms;\nnode.status({ fill: code < 400 ? 'green' : 'yellow', shape: 'dot', text: msg._ep + ' -> ' + code + ' (' + ms + ' ms)' });\nreturn [msg, { payload: entry }];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 730,
+        "y": 620,
+        "wires": [
+            [
+                "rCtl"
+            ],
+            [
+                "dAud"
+            ]
+        ],
+        "info": "Guarda en b02_audit: fecha, endpoint, codigo HTTP, tiempo en ms."
+    },
+    {
+        "id": "rCtl",
+        "type": "http response",
+        "z": "b02tabApi",
+        "name": "Responder (control)",
+        "statusCode": "",
+        "headers": {},
+        "x": 960,
+        "y": 600,
+        "wires": []
+    },
+    {
+        "id": "dAud",
+        "type": "debug",
+        "z": "b02tabApi",
+        "name": "Debug: auditoria de control",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 980,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "dReq",
+        "type": "debug",
+        "z": "b02tabApi",
+        "name": "Debug: peticion recibida",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 460,
+        "y": 800,
+        "wires": []
+    },
+    {
+        "id": "lSimIn",
+        "type": "link in",
+        "z": "b02tabKpi",
+        "name": "← Datos del simulador",
+        "links": [
+            "lSimOut"
+        ],
+        "x": 150,
+        "y": 140,
+        "wires": [
+            [
+                "fKpi"
+            ]
+        ]
+    },
+    {
+        "id": "fKpi",
+        "type": "function",
+        "z": "b02tabKpi",
+        "name": "Calcular 5 KPIs",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// CALCULO DE KPIs (cada ciclo de simulacion)\nconst d = msg.payload;\nconst k = G('b02_kpi') || { pumpedL: 0, leakedL: 0, energyKWh: 0, pumpSec: 0, totalSec: 0 };\nk.pumpedL   += d.flowIn * d.dt / 60;                       // L bombeados   = Q * dt\nk.leakedL   += d.leak * d.dt / 60;                         // L perdidos por fuga\nk.energyKWh += d.power * d.dt / 3600;                      // kWh           = P * dt\nk.pumpSec   += ((d.run[1] ? 1 : 0) + (d.run[2] ? 1 : 0)) * d.dt;   // segundos-bomba en marcha\nk.totalSec  += d.dt;\nconst activo = k.totalSec > 0 ? k.pumpSec / (2 * k.totalSec) * 100 : 0;\nlet efic = k.pumpedL > 0 ? (k.pumpedL - k.leakedL) / k.pumpedL * 100 : 100;\nefic = Math.max(0, Math.min(100, efic));\nk.out = {\n  volumen_bombeado_m3: R(k.pumpedL / 1000, 3),\n  energia_kwh: R(k.energyKWh, 3),\n  tiempo_activo_pct: R(activo, 1),\n  error_nivel_pct: R(d.level - d.setpoint, 1),\n  eficiencia_volumetrica_pct: R(efic, 1)\n};\nS('b02_kpi', k);\nnode.status({ fill: 'green', shape: 'dot', text: k.out.volumen_bombeado_m3 + ' m3 | ' + k.out.energia_kwh + ' kWh' });\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 360,
+        "y": 140,
+        "wires": [
+            [
+                "fHist"
+            ]
+        ],
+        "info": "Volumen (m3), energia (kWh), tiempo activo (%), error de nivel (%), eficiencia volumetrica (%)."
+    },
+    {
+        "id": "fHist",
+        "type": "function",
+        "z": "b02tabKpi",
+        "name": "Guardar historico (ventana)",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// HISTORICO: guarda una muestra cada 2 s (ventana maxima: 3600 s = 1800 muestras)\nconst d = msg.payload;\nconst h = G('b02_history') || { t: [], nivel: [], presion: [], caudal: [], potencia: [], last: 0 };\nif (d.ts - (h.last || 0) >= 2000) {\n  h.t.push(d.ts); h.nivel.push(R(d.level, 2)); h.presion.push(R(d.pressure, 2));\n  h.caudal.push(R(d.flowIn, 1)); h.potencia.push(R(d.power, 2));\n  h.last = d.ts;\n  const MAX = 1800;\n  if (h.t.length > MAX) { const n = h.t.length - MAX; ['t', 'nivel', 'presion', 'caudal', 'potencia'].forEach(c => h[c].splice(0, n)); }\n  S('b02_history', h);\n}\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 600,
+        "y": 140,
+        "wires": [
+            [
+                "fAlarm"
+            ]
+        ],
+        "info": "Una muestra cada 2 s, maximo 1800 muestras = 1 hora."
+    },
+    {
+        "id": "fAlarm",
+        "type": "function",
+        "z": "b02tabKpi",
+        "name": "Evaluar alarmas",
+        "func": "// ---- Utilidades comunes: contexto GLOBAL file-backed (con respaldo en memoria) ----\nconst ST = 'file';\nconst G = k => { try { return global.get(k, ST); } catch (e) { return global.get(k); } };\nconst S = (k, v) => { try { global.set(k, v, ST); } catch (e) { global.set(k, v); } };\nconst R = (x, n) => { const f = Math.pow(10, n || 0); return Math.round(x * f) / f; };\n\n// ALARMAS: genera un evento cuando la condicion aparece y lo cierra cuando se normaliza (con histeresis)\nconst d = msg.payload;\nlet al = G('b02_alarms') || [];\nconst defs = [\n  { cod: 'NIVEL_BAJO', sev: 'ALTA', desc: 'Nivel bajo en el tanque', val: d.level, thr: 20, uni: '%',\n    on: d.level < 20, off: d.level >= 25 },\n  { cod: 'SOBREPRESION', sev: 'CRITICA', desc: 'Sobrepresion en la linea', val: d.pressure, thr: 5.0, uni: 'bar',\n    on: d.pressure > 5.0, off: d.pressure < 4.7 },\n  { cod: 'FUNCIONAMIENTO_SECO', sev: 'CRITICA', desc: 'Bombas activas sin agua en el tanque', val: d.level, thr: 1, uni: '%',\n    on: d.dry, off: !d.dry }\n];\nconst nuevos = [];\ndefs.forEach(f => {\n  const act = al.find(a => a.codigo === f.cod && a.activa);\n  if (!act && f.on) {\n    const a = { id: 'AL-' + d.ts + '-' + f.cod, codigo: f.cod, descripcion: f.desc, severidad: f.sev,\n      valor: R(f.val, 2), umbral: f.thr, unidad: f.uni, tsInicio: d.iso, tsFin: null,\n      activa: true, reconocida: false, tsReconocida: null };\n    al.push(a); nuevos.push(a);\n  } else if (act && f.off) {\n    act.activa = false; act.tsFin = d.iso;\n  }\n});\nif (nuevos.length) {\n  if (al.length > 200) al = al.slice(-200);\n  S('b02_alarms', al);\n  node.status({ fill: 'red', shape: 'dot', text: 'Nueva alarma: ' + nuevos[0].codigo });\n  return { payload: nuevos };\n}\n// guardar cambios de normalizacion\nS('b02_alarms', al);\nnode.status({ fill: al.some(a => a.activa) ? 'yellow' : 'green', shape: 'ring', text: al.filter(a => a.activa).length + ' alarma(s) activa(s)' });\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 820,
+        "y": 140,
+        "wires": [
+            [
+                "dAlarm"
+            ]
+        ],
+        "info": "NIVEL_BAJO (<20%), SOBREPRESION (>5 bar), FUNCIONAMIENTO_SECO (bomba activa con tanque vacio)."
+    },
+    {
+        "id": "dAlarm",
+        "type": "debug",
+        "z": "b02tabKpi",
+        "name": "Debug: NUEVA ALARMA",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 1040,
+        "y": 140,
+        "wires": []
+    }
+]
